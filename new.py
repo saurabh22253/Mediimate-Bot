@@ -34,7 +34,6 @@ import requests
 from fastapi import FastAPI, Request, File, UploadFile
 from fastapi.responses import Response
 from twilio.rest import Client
-from pyngrok import ngrok
 from dotenv import load_dotenv
 from bson import ObjectId
 from PIL import Image
@@ -51,7 +50,6 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID") 
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER")
-NGROK_TOKEN = os.getenv("NGROK_TOKEN")
 
 # MongoDB Configuration
 MONGODB_URI = os.getenv("MONGODB_URI")
@@ -2577,18 +2575,7 @@ async def get_stats():
 if __name__ == "__main__":
     try:
         print("🚀 Starting Mediimate...")
-        # Set up ngrok tunnel
-        if NGROK_TOKEN:
-            ngrok.set_auth_token(NGROK_TOKEN)
-            public_url = ngrok.connect(8001)
-            webhook_url = f"{public_url.public_url}/webhook"
-            print(f"🌐 Ngrok tunnel: {public_url.public_url}")
-            print(f"📱 Webhook URL for Twilio: {webhook_url}")
-            print(f"🔗 Copy this URL and paste it in your Twilio WhatsApp Sandbox webhook settings!")
-            print(f"📋 Alternative endpoint: {public_url.public_url}/whatsapp-webhook")
-        else:
-            print("⚠️ NGROK_TOKEN not found in .env file. Add your ngrok token to get a public URL.")
-        # Start FastAPI server
+        # Directly start FastAPI server for Railways.app
         uvicorn.run(app, host="0.0.0.0", port=8001)
     except KeyboardInterrupt:
         print("\n🛑 Stopping Mediimate...")
