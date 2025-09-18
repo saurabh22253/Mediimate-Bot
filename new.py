@@ -2529,10 +2529,41 @@ Try sending a prescription image! 📸"""
         return Response(status_code=500)
 
 @app.post("/whatsapp-webhook")
-async def whatsapp_webhook_alt(request: Request):
-    """Alternative webhook endpoint for Twilio WhatsApp - redirects to main webhook."""
-    print("📱 Received request at /whatsapp-webhook, redirecting to main webhook handler...")
-    return await whatsapp_webhook(request)
+async def whatsapp_webhook(request: Request):
+    try:
+        form_data = await request.form()
+        print(f"📱 Received webhook data: {dict(form_data)}")
+
+        message_body = form_data.get("Body", "").strip()
+        from_number = form_data.get("From", "")
+
+        print(f"📞 From: {from_number}")
+        print(f"💬 Message: {message_body}")
+
+        response_message = ""
+
+        # --- Your existing logic here ---
+        if from_number in user_editing_sessions:
+            response_message = handle_editing_session(from_number, message_body)
+        else:
+            # fall back to your bot’s normal processing
+            response_message = handle_incoming_message(from_number, message_body)
+
+        # --- Send reply via Twilio REST API ---
+        if response_message:
+            client.messages.create(
+                body=response_message,
+                from_=TWILIO_FROM_NUMBER,
+                to=from_number
+            )
+            print(f"📤 Sent reply to {from_number}: {response_message}")
+
+        return {"status": "ok"}
+
+    except Exception as e:
+        print(f"❌ Webhook error: {e}")
+        return {"status": "error", "error": str(e)}
+
 
 @app.get("/")
 def home():
@@ -2577,6 +2608,18 @@ async def get_stats():
         return {"error": str(e)}
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))  # Railway sets this dynamically
-    uvicorn.run("new:app", host="0.0.0.0", port=port, reload=False)
-
+    try:
+        print("🚀 Starting Mediimate...")
+        # Use Railway's dynamic PORT environment variable
+        port = int(os.environ.get("PORT", 8000))
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    except KeyboardInterrupt:
+        print("\n🛑 Stopping Mediimate...")
+        # Clean up reminder threads
+        for user_threads in reminder_threads.values():
+            for thread in user_threads:
+                thread.do_run = False
+        print("✅ Bot stopped successfully!")
+    except Exception as e:
+        print(f"❌ Startup error: {e}")
+        print(f"🔍 Traceback: {traceback.format_exc()}")
