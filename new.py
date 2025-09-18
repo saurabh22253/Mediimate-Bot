@@ -2252,7 +2252,7 @@ async def handle_daily_tips_command(phone_number: str, message_body: str):
     """Handle daily health tips commands"""
     try:
         command = message_body.lower().strip()
-        
+
         if command in ["daily tips", "health tips", "start tips"]:
             response = "🌟 *Daily Health Tips*\n\n"
             response += "Get personalized health tips delivered daily!\n\n"
@@ -2261,26 +2261,25 @@ async def handle_daily_tips_command(phone_number: str, message_body: str):
             response += "Examples: 09:00, 18:30, 07:45\n\n"
             response += "Default: 09:00 AM if no time specified"
             return response
-        
+
         elif command == "stop tips":
-            # In a real implementation, you'd store this preference in database
-            # For now, we'll just confirm
+            # In a real implementation, you'd store this preference in DB
             response = "❌ Daily health tips have been stopped.\n\n"
             response += "You can restart anytime by typing 'daily tips'"
             return response
-        
-        # Check if user provided a time
+
+        # --- Check if user provided a time ---
         import re
         time_pattern = r'^(\d{1,2}):(\d{2})$'
         match = re.match(time_pattern, command)
-        
+
         if match:
             hour = int(match.group(1))
             minute = int(match.group(2))
-            
+
             if 0 <= hour <= 23 and 0 <= minute <= 59:
                 preferred_time = f"{hour:02d}:{minute:02d}"
-                
+
                 # Schedule daily tips
                 if schedule_daily_health_tip(phone_number, preferred_time):
                     response = f"✅ *Daily Tips Activated!*\n\n"
@@ -2293,12 +2292,14 @@ async def handle_daily_tips_command(phone_number: str, message_body: str):
                     return "❌ Error setting up daily tips. Please try again."
             else:
                 return "❌ Invalid time format. Use HH:MM (e.g., 09:00, 18:30)"
-        
-        return None
-        
+
+        # --- NEW: Fallback if nothing matched ---
+        return "❓ Invalid daily tips command. Try 'daily tips' or send a time in HH:MM format."
+
     except Exception as e:
         print(f"❌ Error handling daily tips command: {e}")
         return "❌ Error processing daily tips request."
+
 
 
 
