@@ -2299,230 +2299,160 @@ async def handle_daily_tips_command(phone_number: str, message_body: str):
 async def whatsapp_webhook(request: Request):
     """Handle incoming WhatsApp messages."""
     try:
+        # Parse incoming form data
         form_data = await request.form()
         print(f"📱 Received webhook data: {dict(form_data)}")
-        
+
+        # Extract message details
         message_body = form_data.get("Body", "").strip()
         from_number = form_data.get("From", "")
-        
-        # Extract media if present
         num_media = int(form_data.get("NumMedia", 0))
         media_url = form_data.get("MediaUrl0") if num_media > 0 else None
         media_content_type = form_data.get("MediaContentType0") if num_media > 0 else None
-        
+
         print(f"📞 From: {from_number}")
         print(f"💬 Message: {message_body}")
         print(f"📎 Media: {media_url} ({media_content_type})")
-        
-        response_message = ""
-        
-        # Check if user is in an editing session
+
+        response_message = None
+
+        # --- Handle editing sessions ---
         if from_number in user_editing_sessions:
             response_message = handle_editing_session(from_number, message_body)
-        
-        # Handle media uploads (images and PDFs)
-        elif media_url and media_content_type and (media_content_type.startswith("image/") or media_content_type == "application/pdf"):
-            print(f"� Processing document from {from_number}: {media_content_type}")
-            
-            # Download media
+
+        # --- Handle media uploads (images / PDFs) ---
+        elif media_url and media_content_type and (
+            media_content_type.startswith("image/") or media_content_type == "application/pdf"
+        ):
+            print(f"📄 Processing document from {from_number}: {media_content_type}")
+
             media_response = requests.get(media_url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
             if media_response.status_code == 200:
                 document_bytes = media_response.content
-                
                 if media_content_type == "application/pdf":
-                    # Handle PDF documents
                     response_message = await handle_pdf_document(from_number, document_bytes, media_url)
                 else:
-                    # Handle image documents
-                    # Detect document type
                     doc_type = detect_document_type(document_bytes)
-                    print(f"📋 Detected document type: {doc_type}")
-                    
                     if doc_type == "prescription":
-                        # Parse prescription
                         summary, medications = parse_prescription(document_bytes)
-                        
-                        if medications:
-                            # Store prescription data
-                            if store_prescription_data(from_number, document_bytes, summary, medications):
-                                response_message = summary + "\n\n"
-                                response_message += "✅ Prescription saved successfully!\n\n"
-                                response_message += "💊 Would you like me to set up medication reminders?\n"
-                                response_message += "Reply 'yes' to start reminders or 'edit' to modify medications."
-                            else:
-                                response_message = summary + "\n\n❌ Failed to save prescription. Please try again."
+                        if medications and store_prescription_data(from_number, document_bytes, summary, medications):
+                            response_message = (
+                                summary
+                                + "\n\n✅ Prescription saved!\n"
+                                + "💊 Would you like me to set reminders?\n"
+                                + "Reply 'yes' to start or 'edit' to modify."
+                            )
                         else:
                             response_message = summary
-                            
                     elif doc_type == "report":
-                        # Parse report
                         summary, test_results = parse_report(document_bytes)
-                        
                         if test_results:
-                            # Analyze test results for red flags
-                            flags_analysis = analyze_test_results_with_flags(test_results)
-                            recommendations = get_personalized_recommendations(test_results, flags_analysis)
-                            
-                            # Store report data
+                            flags = analyze_test_results_with_flags(test_results)
+                            recs = get_personalized_recommendations(test_results, flags)
                             if store_report_data(from_number, document_bytes, summary, test_results):
-                                response_message = summary + "\n\n✅ Report analysis saved successfully!\n\n"
-                                
-                                # Add red flag analysis
-                                if flags_analysis['red_flags']:
-                                    response_message += "🚨 *RED FLAGS DETECTED:*\n"
-                                    for flag in flags_analysis['red_flags']:
-                                        response_message += f"• {flag['parameter']}: {flag['value']} (Deviation: {flag['deviation']}%)\n"
-                                    response_message += "\n"
-                                
-                                if flags_analysis['yellow_flags']:
-                                    response_message += "⚠️ *ATTENTION REQUIRED:*\n"
-                                    for flag in flags_analysis['yellow_flags']:
-                                        response_message += f"• {flag['parameter']}: {flag['value']}\n"
-                                    response_message += "\n"
-                                
-                                # Add personalized recommendations
-                                if recommendations:
-                                    response_message += "💡 *PERSONALIZED RECOMMENDATIONS:*\n"
-                                    for rec in recommendations:
-                                        response_message += f"• {rec}\n"
+                                response_message = summary + "\n\n✅ Report saved!\n"
+                                if flags["red_flags"]:
+                                    response_message += "🚨 *RED FLAGS:*\n"
+                                    for f in flags["red_flags"]:
+                                        response_message += f"• {f['parameter']}: {f['value']} (Deviation {f['deviation']}%)\n"
+                                if flags["yellow_flags"]:
+                                    response_message += "\n⚠️ *ATTENTION REQUIRED:*\n"
+                                    for f in flags["yellow_flags"]:
+                                        response_message += f"• {f['parameter']}: {f['value']}\n"
+                                if recs:
+                                    response_message += "\n💡 *RECOMMENDATIONS:*\n"
+                                    for r in recs:
+                                        response_message += f"• {r}\n"
                             else:
-                                response_message = summary + "\n\n❌ Failed to save report. Please try again."
+                                response_message = summary
                         else:
                             response_message = summary
-                        
             else:
                 response_message = "❌ Could not download the document. Please try again."
-        
-        # Handle text commands
+
+        # --- Handle text commands ---
         elif message_body:
-            message_lower = message_body.lower().strip()
-            
-            # Check for new enhanced features first
-            edit_response = await handle_edit_prescription_command(from_number, message_body)
-            if edit_response:
-                response_message = edit_response
-            
-            elif any(cmd in message_lower for cmd in ["daily tips", "health tips", "start tips", "stop tips"]) or re.match(r'^\d{1,2}:\d{2}$', message_lower):
-                tips_response = await handle_daily_tips_command(from_number, message_body)
-                if tips_response:
-                    response_message = tips_response
-            
-            elif message_lower in ["hi", "hello", "start", "help"]:
-                response_message = """👋 *Welcome to MediRemind Bot Enhanced!*
+            msg = message_body.lower().strip()
 
-🔹 *For Prescriptions:* Send a photo of your prescription to get medication reminders
-🔹 *For Reports:* Send a photo or PDF of your lab report for comprehensive analysis
+            if msg in ["hi", "hello", "hey", "start", "help", "namaste"]:
+                response_message = (
+                    "👋 *Welcome to Mediimate!*\n\n"
+                    "Here’s what I can do:\n"
+                    "• 📄 Read & analyze prescriptions/reports\n"
+                    "• 💊 Extract medicines & set reminders\n"
+                    "• 📝 Edit or update medications\n"
+                    "• 📊 Analyze lab reports & flag results\n"
+                    "• 🌟 Send daily health tips\n"
+                    "• 🔔 Remind you to take medicines\n\n"
+                    "👉 Send me a prescription/report image or type 'help' to see commands."
+                )
 
-📱 *Commands:*
-• `reminders` - View active reminders
-• `edit prescription` - Edit your medications  
-• `daily tips` - Setup daily health tips
-• `stop` - Stop all reminders
-• `reports` - View saved reports
-• `help` - Show this menu
+            elif msg.startswith("add "):
+                response_message = add_medicine_to_prescription(from_number, message_body)
 
-📋 *Enhanced Features:*
-✅ Smart document detection (prescription vs report)
-✅ PDF report processing with comprehensive analysis
-✅ Red flag analysis with personalized recommendations
-✅ Better timing display (AB → After Breakfast)
-✅ Complete medication management via WhatsApp
-✅ Daily health tips scheduling
-✅ Secure database storage with detailed test results
+            elif msg in ["show", "list", "medicines"]:
+                response_message = show_prescription_medicines(from_number)
 
-Send a prescription image or lab report PDF to get started! 📸📄"""
-            
-            elif message_lower == "yes":
-                # Set up reminders for the latest prescription
+            elif msg.startswith("edit "):
+                response_message = handle_edit_prescription_command(from_number, message_body)
+
+            elif msg.startswith("remove "):
+                response_message = remove_medicine_from_prescription(from_number, message_body)
+
+            elif msg == "yes":
                 prescriptions = get_user_prescriptions(from_number)
                 if prescriptions:
-                    latest_prescription = prescriptions[0]
-                    medications = latest_prescription.get('medications', [])
-                    if medications:
-                        setup_reminders(from_number, medications)
-                        response_message = f"✅ Set up reminders for {len(medications)} medications!\n\n"
-                        response_message += "⏰ You'll receive reminders at the appropriate times.\n"
-                        response_message += "💡 Reply 'taken' when you take your medicine or 'skip' to skip a dose."
+                    latest = prescriptions[0]
+                    meds = latest.get("medications", [])
+                    if meds:
+                        setup_reminders(from_number, meds)
+                        response_message = (
+                            f"✅ Set up reminders for {len(meds)} medicines!\n"
+                            "💡 Reply 'taken' when you take a dose or 'skip' if you skip."
+                        )
                     else:
                         response_message = "❌ No medications found in your latest prescription."
                 else:
-                    response_message = "❌ No prescriptions found. Please upload a prescription first."
-            
-            elif message_lower == "edit":
-                # Enhanced edit command - show prescription editing options
-                prescriptions = list(prescriptions_collection.find({"user_phone": from_number}))
-                if prescriptions:
-                    response_message = "📝 *Edit Options*\n\n"
-                    response_message += "Choose your preferred method:\n\n"
-                    response_message += "1️⃣ `edit prescription` - See all prescriptions\n"
-                    response_message += "2️⃣ `edit medicine [name]` - Edit specific medicine\n\n"
-                    response_message += "*Update Commands:*\n"
-                    response_message += "• `update dosage [medicine] to [new dosage]`\n"
-                    response_message += "• `update timing [medicine] to [new timing]`\n"
-                    response_message += "• `update frequency [medicine] to [new frequency]`\n"
-                    response_message += "• `update duration [medicine] to [new duration]`\n\n"
-                    response_message += "📋 Or use the classic edit menu below:"
-                    response_message += show_medication_edit_menu(from_number)
-                else:
-                    response_message = "❌ No prescriptions found. Please upload a prescription first."
-            
-            elif message_lower.startswith(("edit ", "delete ", "view ")):
-                response_message = handle_medication_edit_command(from_number, message_body)
-            
-            elif message_lower == "reminders":
+                    response_message = "❌ No prescriptions found. Please upload one first."
+
+            elif msg == "reminders":
                 prescriptions = get_user_prescriptions(from_number)
-                if prescriptions and prescriptions[0].get('medications'):
+                if prescriptions and prescriptions[0].get("medications"):
+                    meds = prescriptions[0]["medications"]
                     response_message = "⏰ *Your Active Reminders:*\n\n"
-                    for i, med in enumerate(prescriptions[0]['medications'], 1):
-                        timing_display = med.get('timing_display', med.get('frequency', 'As directed'))
-                        response_message += f"{i}. {med['medicine']} - {timing_display}\n"
-                    response_message += f"\n📊 Total: {len(prescriptions[0]['medications'])} medications"
+                    for i, med in enumerate(meds, 1):
+                        timing = med.get("timing_display", med.get("frequency", "As directed"))
+                        response_message += f"{i}. {med['medicine']} - {timing}\n"
                 else:
-                    response_message = "❌ No active reminders. Upload a prescription to get started!"
-            
-            elif message_lower == "stop":
+                    response_message = "❌ No active reminders. Upload a prescription!"
+
+            elif msg == "stop":
                 if from_number in reminder_threads:
                     for thread in reminder_threads[from_number]:
                         thread.do_run = False
-                    del reminder_threads[from_number]
-                    del user_reminders[from_number]
-                    response_message = "🛑 All reminders stopped successfully."
+                    reminder_threads.pop(from_number, None)
+                    user_reminders.pop(from_number, None)
+                    response_message = "🛑 All reminders stopped."
                 else:
                     response_message = "❌ No active reminders to stop."
-            
-            elif message_lower in ["taken", "skip"]:
-                action = "taken" if message_lower == "taken" else "skipped"
-                response_message = f"✅ Dose {action} successfully!\n\n"
-                response_message += f"💡 Health tip: {random.choice(health_tips)}"
-            
-            elif message_lower == "menu":
-                if from_number in user_editing_sessions:
-                    del user_editing_sessions[from_number]
-                response_message = """📱 *Main Menu*
 
-🔹 Send prescription image for medication reminders
-🔹 Send report image for health analysis
-🔹 Type 'edit' to modify your medications
-🔹 Type 'reminders' to view active reminders
-🔹 Type 'help' for full command list"""
-            
+            elif msg in ["taken", "skip"]:
+                action = "taken" if msg == "taken" else "skipped"
+                response_message = f"✅ Dose {action}!\n💡 Health tip: {random.choice(health_tips)}"
+
             else:
-                response_message = """❓ I didn't understand that command.
+                response_message = (
+                    "❓ I didn’t understand that.\n"
+                    "Try one of: add, show, edit, remove, reminders, stop, help."
+                )
 
-📱 *Available Commands:*
-• Send a prescription/report image
-• `edit` - Edit medications
-• `reminders` - View active reminders  
-• `help` - Show help menu
-
-Try sending a prescription image! 📸"""
-        
-        # Send response if we have one
+        # --- Send reply ---
         if response_message:
             send_whatsapp_message(from_number, response_message)
-        
+            print(f"📤 Sent reply to {from_number}: {response_message}")
+
         return Response(status_code=200)
-        
+
     except Exception as e:
         print(f"❌ Webhook error: {e}")
         print(f"🔍 Traceback: {traceback.format_exc()}")
