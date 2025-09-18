@@ -2535,6 +2535,10 @@ async def whatsapp_webhook_alt(request: Request):
     return await whatsapp_webhook(request)
 
 @app.get("/")
+def home():
+    return {"message": "Hello from Railway!"}
+
+@app.get("/health")
 async def health_check():
     """Health check endpoint."""
     return {
@@ -2583,6 +2587,20 @@ if __name__ == "__main__":
         for user_threads in reminder_threads.values():
             for thread in user_threads:
                 thread.do_run = False
+        print("✅ Bot stopped successfully!")
+    except Exception as e:
+        print(f"❌ Startup error: {e}")
+        print(f"🔍 Traceback: {traceback.format_exc()}")
+    try:
+        print("🚀 Starting Mediimate...")
+        # Use Railway's dynamic PORT environment variable
+        port = int(os.environ.get("PORT", 8000))
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    except KeyboardInterrupt:
+        print("\n🛑 Stopping Mediimate...")
+        # Clean up reminder threads
+        for user_threads in reminder_threads.values():
+            pass
         print("✅ Bot stopped successfully!")
     except Exception as e:
         print(f"❌ Startup error: {e}")
