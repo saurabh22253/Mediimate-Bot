@@ -2551,7 +2551,7 @@ async def whatsapp_webhook(request: Request):
 
         # --- Send reply via Twilio REST API ---
         if response_message:
-            client.messages.create(
+            twilio_client.messages.create(
                 body=response_message,
                 from_=TWILIO_FROM_NUMBER,
                 to=from_number
