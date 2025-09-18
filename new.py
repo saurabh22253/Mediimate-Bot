@@ -2476,8 +2476,78 @@ async def whatsapp_webhook(request: Request):
         if from_number in user_editing_sessions:
             response_message = handle_editing_session(from_number, message_body)
         else:
-            # fall back to your bot’s normal processing
-            response_message = handle_incoming_message(from_number, message_body)
+            # Handle text commands
+            msg = message_body.lower().strip()
+
+            if msg in ["hi", "hello", "hey", "start", "help", "namaste"]:
+                response_message = (
+                    "👋 *Welcome to Mediimate!*\n\n"
+                    "Here’s what I can do:\n"
+                    "• 📄 Read & analyze prescriptions/reports\n"
+                    "• 💊 Extract medicines & set reminders\n"
+                    "• 📝 Edit or update medications\n"
+                    "• 📊 Analyze lab reports & flag results\n"
+                    "• 🌟 Send daily health tips\n"
+                    "• 🔔 Remind you to take medicines\n\n"
+                    "👉 Send me a prescription/report image or type 'help' to see commands."
+                )
+
+            elif msg.startswith("add "):
+                response_message = await add_medicine_to_prescription(from_number, message_body)
+
+            elif msg in ["show", "list", "medicines"]:
+                response_message = await show_prescription_medicines(from_number)
+
+            elif msg.startswith("edit "):
+                response_message = await handle_edit_prescription_command(from_number, message_body)
+
+            elif msg.startswith("remove "):
+                response_message = await remove_medicine_from_prescription(from_number, message_body)
+
+            elif msg == "yes":
+                prescriptions = get_user_prescriptions(from_number)
+                if prescriptions:
+                    latest = prescriptions[0]
+                    meds = latest.get("medications", [])
+                    if meds:
+                        setup_reminders(from_number, meds)
+                        response_message = (
+                            f"✅ Set up reminders for {len(meds)} medicines!\n"
+                            "💡 Reply 'taken' when you take a dose or 'skip' if you skip."
+                        )
+                    else:
+                        response_message = "❌ No medications found in your latest prescription."
+                else:
+                    response_message = "❌ No prescriptions found. Please upload one first."
+
+            elif msg == "reminders":
+                prescriptions = get_user_prescriptions(from_number)
+                if prescriptions and prescriptions[0].get("medications"):
+                    meds = prescriptions[0]["medications"]
+                    response_message = "⏰ *Your Active Reminders:*\n\n"
+                    for i, med in enumerate(meds, 1):
+                        timing = med.get("timing_display", med.get("frequency", "As directed"))
+                        response_message += f"{i}. {med['medicine']} - {timing}\n"
+                else:
+                    response_message = "❌ No active reminders. Upload a prescription!"
+            elif msg == "stop":
+                if from_number in reminder_threads:
+                    for thread in reminder_threads[from_number]:
+                        thread.do_run = False
+                    reminder_threads.pop(from_number, None)
+                    user_reminders.pop(from_number, None)
+                    response_message = "🛑 All reminders stopped."
+                else:
+                    response_message = "❌ No active reminders to stop."
+            elif msg in ["taken", "skip"]:
+                action = "taken" if msg == "taken" else "skipped"
+                response_message = f"✅ Dose {action}!\n💡 Health tip: {random.choice(health_tips)}"
+            else:
+                response_message = (
+                    "❓ I didn’t understand that.\n"
+                    "Try one of: add, show, edit, remove, reminders, stop, help."
+                )
+
 
         # --- Send reply via Twilio REST API ---
         if response_message:
