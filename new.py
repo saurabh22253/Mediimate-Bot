@@ -1652,14 +1652,19 @@ def handle_editing_session(user_phone: str, message: str) -> str:
 def send_whatsapp_message(to_number: str, message: str):
     """Send WhatsApp message via Twilio."""
     try:
-        message = twilio_client.messages.create(
+        # Ensure both numbers are in the correct format
+        from_number = TWILIO_FROM_NUMBER if TWILIO_FROM_NUMBER.startswith("whatsapp:") else f"whatsapp:{TWILIO_FROM_NUMBER}"
+        to_number = to_number if to_number.startswith("whatsapp:") else f"whatsapp:{to_number}"
+
+        msg = twilio_client.messages.create(
             body=message,
-            from_=TWILIO_FROM_NUMBER,
-            to=to_number
+            from_=from_number,   # always your Twilio number
+            to=to_number         # always the user’s number
         )
-        print(f"✅ Message sent to {to_number}: {message.sid}")
+        print(f"✅ Message sent to {to_number}: {msg.sid}")
     except Exception as e:
         print(f"❌ Failed to send message to {to_number}: {e}")
+
 
 def setup_reminders(user_phone: str, medications: List[Dict]):
     """Set up medication reminders for a user."""
