@@ -2579,20 +2579,6 @@ async def get_stats():
 if __name__ == "__main__":
     try:
         print("🚀 Starting Mediimate...")
-        # Directly start FastAPI server for Railways.app
-        uvicorn.run(app, host="0.0.0.0", port=8001)
-    except KeyboardInterrupt:
-        print("\n🛑 Stopping Mediimate...")
-        # Clean up reminder threads
-        for user_threads in reminder_threads.values():
-            for thread in user_threads:
-                thread.do_run = False
-        print("✅ Bot stopped successfully!")
-    except Exception as e:
-        print(f"❌ Startup error: {e}")
-        print(f"🔍 Traceback: {traceback.format_exc()}")
-    try:
-        print("🚀 Starting Mediimate...")
         # Use Railway's dynamic PORT environment variable
         port = int(os.environ.get("PORT", 8000))
         uvicorn.run(app, host="0.0.0.0", port=port)
@@ -2600,7 +2586,8 @@ if __name__ == "__main__":
         print("\n🛑 Stopping Mediimate...")
         # Clean up reminder threads
         for user_threads in reminder_threads.values():
-            pass
+            for thread in user_threads:
+                thread.do_run = False
         print("✅ Bot stopped successfully!")
     except Exception as e:
         print(f"❌ Startup error: {e}")
