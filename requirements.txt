@@ -10,3 +10,4 @@ pymongo
 pillow
 requests
 PyPDF2
+google-cloud-vision
