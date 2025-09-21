@@ -112,6 +112,9 @@ def parse_prescription_with_vision(image_bytes: bytes) -> str:
 
 import tempfile
 
+import os, tempfile
+
+# Rebuild credentials file from env var if running on Railway
 if "GOOGLE_CREDENTIALS_JSON" in os.environ and not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
     cred_path = tempfile.NamedTemporaryFile(delete=False, suffix=".json").name
     with open(cred_path, "w") as f:
