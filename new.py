@@ -30,9 +30,6 @@ import re
 from typing import Dict, List, Optional
 import requests
 
-
-
-
 # Core imports
 from fastapi import FastAPI, Request, File, UploadFile
 from fastapi.responses import Response
@@ -44,7 +41,6 @@ import uvicorn
 import nest_asyncio
 import pymongo
 import google.generativeai as genai
-from google.cloud import vision
 
 # Load environment variables
 load_dotenv()
@@ -66,63 +62,6 @@ USERS_COLLECTION = "users"  # Existing collection for users
 genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel("gemini-1.5-flash")
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
-
-# Rebuild credentials file from env var if running on Railway
-if "GOOGLE_CREDENTIALS_JSON" in os.environ and not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
-    cred_path = tempfile.NamedTemporaryFile(delete=False, suffix=".json").name
-    with open(cred_path, "w") as f:
-        f.write(os.environ["GOOGLE_CREDENTIALS_JSON"])
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_path
-
-
-# Vision client
-vision_client = vision.ImageAnnotatorClient()
-
-# Google Cloud Vision OCR helper
-def extract_text_with_vision(image_path: str) -> str:
-    """
-    Extract raw text from an image using Google Cloud Vision OCR.
-    """
-    try:
-        with open(image_path, "rb") as f:
-            content = f.read()
-        gcv_image = vision.Image(content=content)
-        response = vision_client.text_detection(image=gcv_image)
-        texts = response.text_annotations
-        if texts:
-            return texts[0].description.strip()
-    except Exception as e:
-        print(f"❌ Google Vision OCR error: {e}")
-    return ""
-
-# Prescription parsing pipeline
-def parse_prescription_with_vision(image_bytes: bytes) -> str:
-    """
-    Full pipeline: 
-    1. OCR with Google Vision.
-    2. Understanding with Gemini.
-    """
-    import tempfile
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_img:
-        temp_img.write(image_bytes)
-        temp_image_path = temp_img.name
-    raw_text = extract_text_with_vision(temp_image_path)
-    if not raw_text:
-        return "❌ Could not extract text from prescription."
-    prompt = f"""
-    You are a medical assistant. The following text was extracted from a doctor's prescription:\n\n{raw_text}\n\nExtract the medicines, dosage, and frequency in a structured and easy-to-understand way.\nRespond like:\n- Medicine 1: Dose, Frequency\n- Medicine 2: Dose, Frequency\n"""
-    try:
-        response = gemini_model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"❌ Gemini parsing error: {e}"
-
-
-import tempfile
-
-import os, tempfile
-
 
 # Initialize MongoDB
 try:
@@ -154,10 +93,8 @@ except Exception as e:
     users_collection = None
 
 # FastAPI app
-
 app = FastAPI(title="Mediimate", description="WhatsApp Medicine Reminder System with Smart Document Processing")
 nest_asyncio.apply()
-
 
 # Global storage
 user_prescriptions = {}
@@ -208,11 +145,6 @@ lab_normal_ranges = {
     "Creatinine": {"min": 0.7, "max": 1.3, "unit": "mg/dL", "advice": "Stay hydrated and avoid excessive protein intake."}
 }
 
-# Vision client
-vision_client = vision.ImageAnnotatorClient()
-
-
-
 def detect_document_type(image_bytes: bytes) -> str:
     """
     Detect whether the uploaded document is a prescription or a medical report
@@ -221,47 +153,83 @@ def detect_document_type(image_bytes: bytes) -> str:
     try:
         print(f"🔍 Detecting document type...")
         
-        try:
-            print(f"🔍 Detecting document type with Gemini only...")
-            detection_prompt = """
-            Analyze this medical document image and determine if it is:
+        detection_prompt = """
+        Analyze this medical document image and determine if it is:
         
-            1. PRESCRIPTION: Contains medications, dosage instructions, doctor's signature, pharmacy details, medicine names with timing instructions
-            2. REPORT: Contains lab test results, diagnostic values, reference ranges, test parameters, blood work, imaging results
+        1. PRESCRIPTION: Contains medications, dosage instructions, doctor's signature, pharmacy details, medicine names with timing instructions
+        2. REPORT: Contains lab test results, diagnostic values, reference ranges, test parameters, blood work, imaging results
         
-            Look for these key indicators:
+        Look for these key indicators:
         
-            PRESCRIPTION indicators:
-            - Medicine names (e.g., Paracetamol, Aspirin, Metformin)
-            - Dosage instructions (e.g., 1-0-1, twice daily, before/after food)
-            - Doctor's signature or stamp
-            - Pharmacy letterhead
-            - "Take as directed" or similar instructions
-            - Duration (e.g., "for 7 days")
+        PRESCRIPTION indicators:
+        - Medicine names (e.g., Paracetamol, Aspirin, Metformin)
+        - Dosage instructions (e.g., 1-0-1, twice daily, before/after food)
+        - Doctor's signature or stamp
+        - Pharmacy letterhead
+        - "Take as directed" or similar instructions
+        - Duration (e.g., "for 7 days")
         
-            REPORT indicators:
-            - Lab test names (e.g., Hemoglobin, WBC count, Blood Sugar)
-            - Numerical values with units (e.g., 12.5 g/dL, 150 mg/dL)
-            - Reference ranges (e.g., Normal: 12-16)
-            - Hospital/lab letterhead
-            - "Results" or "Report" in header
-            - Patient demographics and test dates
+        REPORT indicators:
+        - Lab test names (e.g., Hemoglobin, WBC count, Blood Sugar)
+        - Numerical values with units (e.g., 12.5 g/dL, 150 mg/dL)
+        - Reference ranges (e.g., Normal: 12-16)
+        - Hospital/lab letterhead
+        - "Results" or "Report" in header
+        - Patient demographics and test dates
         
-            Respond with only ONE word: "prescription" or "report"
-            """
-            # Pass the image directly to Gemini for classification
-            response = gemini_model.generate_content([detection_prompt, image_bytes])
-            detection_result = response.text.strip().lower()
-            if "prescription" in detection_result:
-                return "prescription"
-            elif "report" in detection_result:
-                return "report"
-            else:
-                print(f"⚠️ Unclear detection result: {detection_result}, defaulting to prescription")
-                return "prescription"
-        except Exception as e:
-            print(f"❌ Gemini classification error: {e}")
+        Respond with only ONE word: "prescription" or "report"
+        """
+        
+        image = Image.open(io.BytesIO(image_bytes))
+        response = gemini_model.generate_content([detection_prompt, image])
+        
+        detection_result = response.text.strip().lower()
+        
+        # Clean up the response
+        if "prescription" in detection_result:
             return "prescription"
+        elif "report" in detection_result:
+            return "report"
+        else:
+            # Default to prescription if unclear
+            print(f"⚠️ Unclear detection result: {detection_result}, defaulting to prescription")
+            return "prescription"
+            
+    except Exception as e:
+        print(f"❌ Document detection failed: {e}")
+        # Default to prescription on error
+        return "prescription"
+
+def parse_report(image_bytes: bytes) -> tuple:
+    """Parse lab report image, flag abnormal values, and suggest improvements."""
+    try:
+        print(f"🔍 Starting report analysis...")
+        print(f"📷 Image size: {len(image_bytes)} bytes")
+        
+        prompt = """
+        You are a medical report parser. Analyze this lab report image and extract a JSON array of test results.
+        For each test, return:
+        [
+          {
+            "test": "Test Name",
+            "value": "Numeric Value",
+            "unit": "Unit",
+            "reference_range": "Normal Range if available"
+          }
+        ]
+        Only return the JSON array.
+        """
+        
+        image = Image.open(io.BytesIO(image_bytes))
+        response = gemini_model.generate_content([prompt, image])
+        
+        response_text = response.text.strip()
+        if response_text.startswith("```json"):
+            response_text = response_text[7:-3]
+        elif response_text.startswith("```"):
+            response_text = response_text[3:-3]
+            
+        print(f"📝 Got response: {response_text[:200]}...")
         
         test_results = json.loads(response_text)
         flagged = []
@@ -1291,12 +1259,113 @@ def parse_prescription(image_bytes: bytes) -> tuple:
     try:
         print(f"💊 Starting prescription parsing...")
         print(f"📷 Image size: {len(image_bytes)} bytes")
-        response_text = parse_prescription_with_vision(image_bytes)
-        print(f"📝 Gemini response: {response_text[:200]}...")
-        return response_text, []
+        
+        prompt = """
+        You are a prescription parser. Analyze this prescription image and extract medication details.
+        Return a JSON array of medications:
+        [
+          {
+            "medicine": "Medicine Name",
+            "dosage": "Strength (e.g., 500mg)",
+            "frequency": "Timing code (e.g., BB, AB, BL, AL, BD, AD)",
+            "duration": "Duration (e.g., 7 days)",
+            "instructions": "Special instructions if any"
+          }
+        ]
+        
+        Common timing codes:
+        - BB: Before Breakfast
+        - AB: After Breakfast  
+        - BL: Before Lunch
+        - AL: After Lunch
+        - BD: Before Dinner
+        - AD: After Dinner
+        
+        Only return the JSON array.
+        """
+        
+        image = Image.open(io.BytesIO(image_bytes))
+        response = gemini_model.generate_content([prompt, image])
+        
+        response_text = response.text.strip()
+        if response_text.startswith("```json"):
+            response_text = response_text[7:-3]
+        elif response_text.startswith("```"):
+            response_text = response_text[3:-3]
+            
+        print(f"📝 Got response: {response_text[:200]}...")
+        
+        medications = json.loads(response_text)
+        
+        # Process and enhance timing display
+        for med in medications:
+            timing_code = med.get('frequency', '').upper()
+            if timing_code in TIMING_MAPPINGS:
+                timing_info = TIMING_MAPPINGS[timing_code]
+                med['timing_display'] = timing_info['display']
+                med['suggested_time'] = timing_info['time']
+                med['food_relation'] = timing_info['food']
+            else:
+                med['timing_display'] = med.get('frequency', 'As directed')
+                med['suggested_time'] = '12:00'
+                med['food_relation'] = 'any time'
+        
+        # Create summary with enhanced display
+        summary = "💊 *Prescription Analysis*\n\n"
+        for i, med in enumerate(medications, 1):
+            summary += f"{i}. *{med['medicine']}* {med.get('dosage', '')}\n"
+            summary += f"   ⏰ {med['timing_display']}\n"
+            summary += f"   📅 Duration: {med.get('duration', 'As prescribed')}\n"
+            if med.get('instructions'):
+                summary += f"   📝 Instructions: {med['instructions']}\n"
+            summary += "\n"
+            
+        print(f"✅ Prescription summary: {summary}")
+        return summary, medications
+        
     except Exception as e:
         print(f"❌ Prescription parsing failed: {e}")
-        return "❌ Could not parse prescription.", []
+        return "❌ Could not parse the prescription. Please try again with a clear image.", []
+
+def store_prescription_data(user_phone: str, image_bytes: bytes, summary: str, medications: List[Dict]) -> bool:
+    """Store prescription data in MongoDB prescriptions collection"""
+    try:
+        if prescriptions_collection is None:
+            print("❌ Prescriptions collection not available")
+            return False
+            
+        # Create prescription document
+        prescription_document = {
+            "user_phone": user_phone,
+            "prescription_date": datetime.datetime.now(),
+            "summary": summary,
+            "medications": medications,
+            "image_size": len(image_bytes),
+            "status": "active",  # active, completed, cancelled
+            "created_at": datetime.datetime.now(),
+            "updated_at": datetime.datetime.now()
+        }
+        
+        # Insert prescription
+        result = prescriptions_collection.insert_one(prescription_document)
+        prescription_id = str(result.inserted_id)
+        
+        print(f"💊 Stored prescription for {user_phone} with ID: {prescription_id}")
+        
+        # Also store in memory for quick access
+        if user_phone not in user_prescriptions:
+            user_prescriptions[user_phone] = []
+        user_prescriptions[user_phone].append({
+            "id": prescription_id,
+            "medications": medications,
+            "created_at": datetime.datetime.now()
+        })
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Failed to store prescription: {e}")
+        return False
 
 def get_user_prescriptions(user_phone: str) -> List[Dict]:
     """Get all prescriptions for a user from database"""
@@ -2281,7 +2350,7 @@ async def whatsapp_webhook(request: Request):
                                 + "\n💊 Reply 'yes' to set reminders or 'edit' to modify medicines."
                             )
                         else:
-                            response_message = summary
+                            response_message = summary + "\n\n❌ Could not save prescription."
 
                     elif doc_type == "report":
                         summary, test_results = parse_report(document_bytes)
@@ -2438,6 +2507,7 @@ async def get_stats():
     except Exception as e:
         print(f"❌ Stats error: {e}")
         return {"error": str(e)}
+
 if __name__ == "__main__":
     try:
         print("🚀 Starting Mediimate...")
